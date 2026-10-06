@@ -12,7 +12,7 @@ from typing import Any, Optional
 from loguru import logger
 
 from ..datamodel.db import Run
-from ..utils.utils import get_file_type
+from ..utils.utils import RunPathError, build_run_dir, get_file_type
 
 
 def validate_uploaded_files(
@@ -30,14 +30,14 @@ def validate_uploaded_files(
     validated: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
 
     if run is not None:
-        run_suffix = (
-            "files",
-            "user",
-            str(run.user_id or "unknown_user"),
-            str(run.session_id or "unknown_session"),
-            str(run.id or "unknown_run"),
-        )
-        allowed_root_path = app_dir.joinpath(*run_suffix)
+        try:
+            allowed_root_path = build_run_dir(app_dir, run)
+        except RunPathError as e:
+            logger.warning(
+                "Rejecting all uploaded files: run has unsafe path identifiers (%s)",
+                e,
+            )
+            return []
         scope_label = "run dir"
     else:
         allowed_root_path = app_dir / "files" / "user"

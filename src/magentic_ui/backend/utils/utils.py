@@ -1,8 +1,11 @@
 import os
 from pathlib import Path
-from typing import Any, List, Dict, Iterable, TypedDict
+from typing import Any, List, Dict, Iterable, Optional, TypedDict, TYPE_CHECKING
 import json
 from loguru import logger
+
+if TYPE_CHECKING:
+    from ..datamodel.db import Run
 
 
 class ModifiedFileInfo(TypedDict):
@@ -14,6 +17,70 @@ class ModifiedFileInfo(TypedDict):
     extension: str
     type: str
     timestamp: float
+
+
+class RunPathError(ValueError):
+    """Raised when a run's identifiers cannot form a safe on-disk path."""
+
+
+def _is_safe_path_segment(value: str) -> bool:
+    """True if ``value`` is a single, non-traversing path component."""
+    if not value or not value.strip():
+        return False
+    if "\x00" in value or "/" in value or "\\" in value:
+        return False
+    if value in (".", ".."):
+        return False
+    return True
+
+
+def validate_user_id(user_id: str) -> str:
+    """Validate a client-supplied ``user_id``.
+
+    ``user_id`` is used as a directory name under ``<app_dir>/files/user``,
+    so it must be a single path component. Raises ``ValueError`` otherwise.
+    """
+    if not isinstance(user_id, str) or not _is_safe_path_segment(user_id):
+        raise ValueError(f"Invalid user_id: {user_id!r}")
+    return user_id
+
+
+def build_run_dir(app_dir: Path, run: Optional["Run"]) -> Path:
+    """Return ``<app_dir>/files/user/<user_id>/<session_id>/<run_id>``.
+
+    Every segment is validated as a single path component, and the final
+    path is checked to stay under ``<app_dir>/files/user``. Raises
+    ``RunPathError`` if either check fails. This is the single source of
+    truth for run directories; the upload validator and the team manager
+    must both use it so they can never disagree.
+    """
+    root = app_dir / "files" / "user"
+    if run is None:
+        segments = ["unknown_user", "unknown_session", "unknown_run"]
+    else:
+        segments = [
+            str(run.user_id or "unknown_user"),
+            str(run.session_id or "unknown_session"),
+            str(run.id or "unknown_run"),
+        ]
+
+    for seg in segments:
+        if not _is_safe_path_segment(seg):
+            raise RunPathError(f"Unsafe run path segment: {seg!r}")
+
+    run_dir = root.joinpath(*segments)
+
+    # Defense in depth: the segment check above should make this
+    # unreachable, but verify containment after resolving anyway.
+    try:
+        resolved = run_dir.resolve(strict=False)
+        resolved_root = root.resolve(strict=False)
+    except OSError as e:
+        raise RunPathError(f"Cannot resolve run dir: {e}") from e
+    if not resolved.is_relative_to(resolved_root):
+        raise RunPathError(f"Run dir escapes files/user root: {run_dir}")
+
+    return run_dir
 
 
 def sanitize_filename(filename: str) -> str:
