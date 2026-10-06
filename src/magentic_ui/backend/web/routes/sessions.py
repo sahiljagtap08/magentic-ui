@@ -10,6 +10,7 @@ from sqlmodel import Session as DBSession, select
 
 from ...datamodel import Message, Run, Session, RunStatus
 from ..deps import get_db, get_websocket_manager
+from ...utils.utils import validate_user_id
 
 router = APIRouter()
 
@@ -91,6 +92,17 @@ async def get_session(session_id: int, user_id: str, db=Depends(get_db)) -> Dict
 @router.post("/")
 async def create_session(session: Session, db=Depends(get_db)) -> Dict:
     """Create a new session with an associated run"""
+    # user_id becomes a directory name under <app_dir>/files/user, so it
+    # must be a single path component (no "/", "\\", "..", etc.).
+    try:
+        validate_user_id(session.user_id or "")
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid user_id")
+
+    # Never trust a client-supplied id on create: db.upsert() would
+    # overwrite an existing row with that id.
+    session.id = None
+
     # Create session
     session_response = db.upsert(session)
     if not session_response.status:
@@ -126,6 +138,11 @@ async def update_session(
     existing = db.get(Session, filters={"id": session_id, "user_id": user_id})
     if not existing.status or not existing.data:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    # Pin the body to the verified row so a client cannot redirect the
+    # update to another session or re-own it.
+    session.id = session_id
+    session.user_id = user_id
 
     # Update the session
     response = db.upsert(session)

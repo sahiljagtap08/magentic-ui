@@ -44,7 +44,7 @@ from ...sandbox._path_normalizer import extract_dir_basename, normalize_host_pat
 from ...sandbox._path_validator import validate_host_path
 from ..datamodel import Settings
 from ..datamodel.db import Run
-from ..utils.utils import get_modified_files, ModifiedFileInfo
+from ..utils.utils import build_run_dir, get_modified_files, ModifiedFileInfo
 from ._upload_validation import validate_uploaded_files
 
 if TYPE_CHECKING:
@@ -185,21 +185,11 @@ class TeamManager:
 
         Creates the directory on disk. The guest (VM) path is derived
         at runtime via sandbox.to_guest_path().
-        """
-        if run:
-            run_suffix = os.path.join(
-                "files",
-                "user",
-                str(run.user_id or "unknown_user"),
-                str(run.session_id or "unknown_session"),
-                str(run.id or "unknown_run"),
-            )
-        else:
-            run_suffix = os.path.join(
-                "files", "user", "unknown_user", "unknown_session", "unknown_run"
-            )
 
-        host_run_dir = self.app_dir / Path(run_suffix)
+        Raises ``RunPathError`` if the run's identifiers would produce a
+        directory outside ``<app_dir>/files/user``.
+        """
+        host_run_dir = build_run_dir(self.app_dir, run)
         logger.info(f"Creating run dir: {host_run_dir}")
         host_run_dir.mkdir(parents=True, exist_ok=True)
         return host_run_dir

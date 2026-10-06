@@ -9,7 +9,7 @@ from loguru import logger
 from ...datamodel import Message, Run, RunStatus, Session
 from ..deps import get_db, get_websocket_manager
 from ...teammanager import TeamManager
-from ...utils.utils import find_available_filename, sanitize_filename
+from ...utils.utils import RunPathError, find_available_filename, sanitize_filename
 
 router = APIRouter()
 
@@ -113,7 +113,11 @@ async def upload_files(
     )
 
     # Prepare host-side run directory (creates the directory on disk)
-    host_run_dir = team_manager.prepare_host_run_dir(run=run)
+    try:
+        host_run_dir = team_manager.prepare_host_run_dir(run=run)
+    except RunPathError:
+        logger.error(f"Run {run_id} has unsafe path identifiers; refusing upload")
+        raise HTTPException(status_code=400, detail="Invalid run directory")
 
     uploaded_files = []
     batch_names: List[str] = []
